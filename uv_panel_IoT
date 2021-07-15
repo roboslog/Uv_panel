@@ -1,0 +1,438 @@
+// Written by ROBOSLOG TEAM 
+
+#include "FS.h"
+#include "SD.h"
+#include "SPI.h"
+#include "RTClib.h"
+#include <time.h>
+String dataString = "",dataString2 = "";
+
+RTC_DS1307 RTC;
+
+int nows, olds;
+int nows2, olds2;
+
+
+//------------------------------------------------------------------------------
+#define errorHalt(msg) {Serial.println(F(msg)); while(1);}
+
+long uv1log,uv2log=0;
+bool uv1,uv2=0;
+#include <Arduino.h>
+
+#include <WiFi.h>
+#include <WiFiMulti.h>
+
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+
+WiFiMulti WiFiMulti;
+#define LOG_INTERVAL 1000 // mills between entries (reduce to take more/faster data)
+
+// how many milliseconds before writing the logged data permanently to disk
+// set it to the LOG_INTERVAL to write each time (safest)
+// set it to 10*LOG_INTERVAL to write all data every 10 datareads, you could lose up to 
+// the last 10 reads if power is lost but it uses less power and is much faster!
+#define SYNC_INTERVAL 1000 // mills between calls to flush() - to write data to the card
+uint32_t syncTime = 0; // time of last sync()
+
+#define ECHO_TO_SERIAL   1 // echo data to serial port
+#define WAIT_TO_START    0 // Wait for serial input in setup()
+
+// include library to read and write from flash memory
+
+const char *ssid =  "roboslog";  //  /TP-LINK  replace with your wifi ssid and wpa2 key
+const char *pass =  "lopklopk";
+// include the library code:
+#include <LiquidCrystal.h>
+unsigned long ledState = 0;         
+unsigned long ledState1 = 0;         
+int sec = 0;
+bool temp=0;
+
+long timezone = 1; 
+byte daysavetime = 1;
+unsigned long interval = 1;
+bool inputPin = 0;
+unsigned long p1=0;
+unsigned long q1=0;
+unsigned long r1=0;
+unsigned long s1=0;
+unsigned long p2=0;
+unsigned long q2=0;
+unsigned long r2=0;
+unsigned long s2=0;
+
+unsigned long x=0;
+unsigned long y=0;
+unsigned long z=0;
+
+long currentMillis2,currentMillis3 = 0;
+
+#include "ACS712.h"
+
+//ACS712  ACS(A0, 5.0, 1023, 100);
+// ESP 32 example (requires resistors to step down the logic voltage)
+ACS712  ACS(4, 5.0, 4095, 185);
+unsigned long interval2 = 4000;
+
+unsigned long previousTime2,previousMillis2 = 0;
+unsigned long previousTime3,previousMillis3 = 0;
+
+unsigned long previousTime1,previousMillis1 = 0;
+unsigned long previousTime,previousMillis = 0;
+String st,st1,st2,st3="";
+
+long day = 86400000; // 86400000 milliseconds in a day
+long hour = 3600000; // 3600000 milliseconds in an hour
+long minute = 60000; // 60000 milliseconds in a minute
+long second =  1000; // 1000 milliseconds in a second
+bool flag=0;
+bool flag2=0;
+//const int rs = 32, en = 33, d4 = 25, d5 = 26, d6 = 27, d7 = 14;
+const int rs = 33, en = 25, d4 = 26, d5 = 27, d6 = 14, d7 = 32;
+
+// initialize the library by associating any needed LCD interface pin
+// with the arduino pin number it is connected to
+//const int rs = 27, en = 14, d4 = 25, d5 = 26, d6 = 32, d7 = 33;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
+bool healthuv1=0;
+bool healthuv2=0;
+
+int recordCount,numberOfBytesPerRecord,lastRecordStart=0;
+
+//parse data vals
+int dataarr[60] = {};     //array of parsed data
+int arrpointer = 0;       //array pointer
+int column = 8;           //column to parse
+int columncount = 1;      //start at column 1 not 0
+int rowincrement = 2;     //increment the number of parse rows - set to 1 for all rows
+int rowcount = 1;         //start at row 1 not 0
+
+void setup() {
+
+     struct tm tmstruct ;
+
+   lcd.begin(16, 2);
+ // EEPROM.begin(EEPROM_SIZE);
+    Serial.begin(115200);
+
+  // set up the LCD's number of columns and rows:
+
+
+  // read the last brightness level from flash memory
+  
+ /* previousMillis = (EEPROM.read(0))*100;
+          r1=previousMillis;
+          Serial.print("previousTime");
+          Serial.println(previousMillis);
+          
+            previousMillis1 = (EEPROM.read(1))*1000;
+              r2=previousMillis1;
+      Serial.print("previousTime1: ");
+          Serial.println(previousMillis1);
+
+*/
+  lcd.setCursor(0, 0);
+  lcd.print("Hi, Slog's UV !");
+// lcd.autoscroll();
+  lcd.setCursor(0, 1);
+//  scrollInFromRight(0, "Press to ON UVs");
+lcd.print("Press to ON UVs");
+
+pinMode(13,INPUT_PULLUP);
+pinMode(15,INPUT_PULLUP);
+
+     Serial.println("Connecting to ");
+       Serial.println(ssid);
+       
+       WiFi.begin(ssid, pass);
+
+      while (WiFi.status() != WL_CONNECTED) 
+     {
+            delay(200);
+            Serial.print(".");
+            if(millis()>1000)
+     {
+  
+            Serial.println("skip wifi");
+            break;
+     }
+     else
+     Serial.println(" connecting");
+     }
+        
+  if ((WiFi.status() == WL_CONNECTED)) {
+    WiFiClient client;
+
+    // The line below is optional. It can be used to blink the LED on the board during flashing
+    // The LED will be on during download of one buffer of data from the network. The LED will
+    // be off during writing that buffer to flash
+    // On a good connection the LED should flash regularly. On a bad connection the LED will be
+    // on much longer than it will be off. Other pins than LED_BUILTIN may be used. The second
+    // value is used to put the LED on. If the LED is on with HIGH, that value should be passed
+    // httpUpdate.setLedPin(LED_BUILTIN, LOW);
+
+    t_httpUpdate_return ret = httpUpdate.update(client, "https://roboslog.in//uv.bin");
+    // Or:
+    //t_httpUpdate_return ret = httpUpdate.update(client, "server", 80, "file.bin");
+
+    switch (ret) {
+      case HTTP_UPDATE_FAILED:
+        Serial.printf("HTTP_UPDATE_FAILED Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+        break;
+
+      case HTTP_UPDATE_NO_UPDATES:
+        Serial.println("HTTP_UPDATE_NO_UPDATES");
+        break;
+
+      case HTTP_UPDATE_OK:
+        Serial.println("HTTP_UPDATE_OK");
+        break;
+    }
+
+ /*   configTime(3600*timezone, daysavetime*3600, "time.nist.gov", "0.pool.ntp.org", "1.pool.ntp.org");
+  struct tm tmstruct ;
+    delay(2000);
+    tmstruct.tm_year = 0;
+    getLocalTime(&tmstruct, 5000);
+    Serial.printf("\nNow RTC adjusting : %d-%02d-%02d %02d:%02d:%02d\n",(tmstruct.tm_year)+1900,( tmstruct.tm_mon)+1, tmstruct.tm_mday,tmstruct.tm_hour , tmstruct.tm_min, tmstruct.tm_sec);
+    Serial.println("...");
+    
+    Serial.println(tmstruct.tm_year);
+    // RTC.adjust(DateTime(((tmstruct.tm_year)+1900), ((tmstruct.tm_mon)+1), tmstruct.tm_mday, tmstruct.tm_hour,  tmstruct.tm_min, tmstruct.tm_sec));
+          RTC.adjust(DateTime((tmstruct.tm_year), (tmstruct.tm_mon), tmstruct.tm_mday, tmstruct.tm_hour,  tmstruct.tm_min, tmstruct.tm_sec));
+
+*/
+  }
+  
+  /*
+
+    tmstruct.tm_year = 0;
+    getLocalTime(&tmstruct, 5000);
+    Serial.printf("\n old : %d-%02d-%02d %02d:%02d:%02d\n",(tmstruct.tm_year)+1900,( tmstruct.tm_mon)+1, tmstruct.tm_mday,tmstruct.tm_hour , tmstruct.tm_min, tmstruct.tm_sec);
+    Serial.println("...");
+    
+    Serial.println(tmstruct.tm_year);
+    
+
+    delay(1000);
+    tmstruct.tm_year = now.year();
+    tmstruct.tm_mon=now.month();
+    tmstruct.tm_mday=now.day();
+    tmstruct.tm_hour=now.hour();
+    
+    tmstruct.tm_min=now.minute();
+    tmstruct.tm_sec=now.second();
+
+  Serial.printf("\n New time : %d-%02d-%02d %02d:%02d:%02d\n",(tmstruct.tm_year)+1900,( tmstruct.tm_mon)+1, tmstruct.tm_mday,tmstruct.tm_hour , tmstruct.tm_min, tmstruct.tm_sec);
+    Serial.println("...");
+
+  */
+  
+  if(!SD.begin()){
+      Serial.println("Card Mount Failed");
+      return;
+      }
+
+
+  
+  writeFile(SD, "/uv1.csv", "id,year,month,day,hour,minute,second, uv1log, healthuv1 \r\n");
+    writeFile(SD, "/uv1.text", "id,year,month,day,hour,minute,second, uv1log, healthuv1 \r\n");
+  writeFile(SD, "/uv2.csv", "id,year,month,day,hour,minute,second, uv2log, healthuv2 \r\n");
+
+
+
+  Serial.println(dataString2);
+  appendFile(SD, "/uv2.csv", dataString2.c_str());
+
+     File myFile = SD.open("uv1.txt");
+  if (!myFile) {
+    Serial.println("error opening test.txt");
+    return;
+  }
+  Serial.println("uv1 .txt:");
+
+  // read from the file until there's nothing else in it:
+  String l_line;
+  l_line.reserve(128); //Avoids heap memory fragmentation
+                       //Reserve space for your longest expected data line
+  
+  while (myFile.available()) {
+    l_line = myFile.readStringUntil('\n');
+    l_line.trim();
+    if (l_line != "") {
+      int l_start_posn = 0;
+      while (l_start_posn != -1)
+      {
+   Serial.println(ENDF2(l_line,l_start_posn,',').toInt());
+      //
+    } //skip blank (NULL) lines
+  }//Read the file line by line
+  myFile.close();
+  }
+}
+
+void loop(){
+ DateTime now = RTC.now();
+
+
+if(!digitalRead(13))
+{  
+   Serial.print("wait for a sec after button 13");
+
+nows=now.second();
+if(nows!=olds)
+{
+    olds=nows;
+  lastwrite(SD, "/uv1.csv", 0);
+  
+   uv1log++;
+  dataString = "";
+   uv1=1;
+dataString += String(now.unixtime());
+  dataString += ",";
+    dataString += String(now.year());
+  dataString += ",";
+    dataString += String(now.month());
+  dataString += ",";
+    dataString += String(now.day());
+  dataString += ",";
+    dataString += String(now.hour());
+  dataString += ",";
+    dataString += String(now.minute());
+  dataString += ",";
+  dataString += String(now.second());
+  dataString += ",";
+  dataString += String(uv1log);
+  dataString += ",";
+    dataString += String(uv1);
+  dataString += ",";
+  dataString += String(healthuv1);
+  dataString += "\r\n";
+#if ECHO_TO_SERIAL
+  Serial.print(now.unixtime()); // seconds since 1/1/1970
+  Serial.print(", ");
+  Serial.print('"');
+  Serial.print(now.year(), DEC);
+  Serial.print("/");
+  Serial.print(now.month(), DEC);
+  Serial.print("/");
+  Serial.print(now.day(), DEC);
+  Serial.print(" ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(":");
+  Serial.print(now.minute(), DEC);
+  Serial.print(":");
+  Serial.print(now.second(), DEC);
+  Serial.print('"   ');
+  #endif
+
+  Serial.println(dataString);
+  appendFile(SD, "/uv1.csv", dataString.c_str());
+}
+}
+
+if(!digitalRead(15))
+{
+  Serial.print("wait for a sec after button 15");
+
+  nows2=now.second();
+if(nows2!=olds2)
+{   
+  olds2=nows2;
+  lastwrite(SD, "/uv2.csv", 0);
+  
+   uv2log++;
+  dataString2 = "";
+   uv2=1;
+dataString2 += String(now.unixtime());
+  dataString2 += ",";
+    dataString2 += String(now.year());
+  dataString2 += ",";
+    dataString2 += String(now.month());
+  dataString2 += ",";
+    dataString2 += String(now.day());
+  dataString2 += ",";
+    dataString2 += String(now.hour());
+  dataString2 += ",";
+    dataString2 += String(now.minute());
+  dataString2 += ",";
+  dataString2 += String(now.second());
+  dataString2 += ",";
+    dataString += String(uv2log);
+  dataString += ",";
+  dataString2 += String(uv2);
+  dataString2 += ",";
+  dataString2+= String(healthuv2);
+  dataString2 += "\r\n";
+#if ECHO_TO_SERIAL
+  Serial.print(now.unixtime()); // seconds since 1/1/1970
+  Serial.print(", ");
+  Serial.print('"');
+  Serial.print(now.year(), DEC);
+  Serial.print("/");
+  Serial.print(now.month(), DEC);
+  Serial.print("/");
+  Serial.print(now.day(), DEC);
+  Serial.print(" ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(":");
+  Serial.print(now.minute(), DEC);
+  Serial.print(":");
+  Serial.print(now.second(), DEC);
+  Serial.print('"   ');
+#endif
+
+  Serial.println(dataString2);
+  appendFile(SD, "/uv2.csv", dataString2.c_str());
+    
+ // delay(2000);
+}
+}
+
+}
+
+
+void writeFile(fs::FS &fs, const char * path, const char * message){
+    Serial.printf("Writing file: %s\n", path);
+
+    File file = fs.open(path, FILE_WRITE);
+    if(!file){
+        Serial.println("Failed to open file for writing");
+        return;
+    }
+        if(file.print(message)){
+        Serial.println("File written");
+    } else {
+        Serial.println("Write failed");
+    }
+    file.close();
+}
+
+void appendFile(fs::FS &fs, const char * path, const char * message){
+    Serial.printf("Appending to file: %s\n", path);
+  //  delay(100);
+  
+    File file = fs.open(path, FILE_APPEND);
+    if(!file){
+        Serial.println("Failed to open file for appending");
+        return;
+    }
+  
+    if(file.print(message)){
+        Serial.println("Message appended");
+    } else {
+        Serial.println("Append failed");
+    }
+    file.close();
+}
+
+void lastwrite(fs::FS &fs, const char * path, uint8_t levels)
+    {
+       File file = fs.open(path);
+            time_t t= file.getLastWrite();
+            struct tm * tmstruct = localtime(&t);
+            Serial.printf("  LAST WRITE: %d-%02d-%02d %02d:%02d:%02d\n",(tmstruct->tm_year)+1900,( tmstruct->tm_mon)+1, tmstruct->tm_mday,tmstruct->tm_hour , tmstruct->tm_min, tmstruct->tm_sec);    
+    }
